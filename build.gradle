@@ -1,0 +1,111 @@
+plugins {
+  id 'java'
+  id 'io.freefair.aspectj' version '8.6'
+}
+
+group = 'pvt.repro.aspectj'
+version = '1.0'
+
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of(17)
+  }
+}
+
+repositories {
+  mavenCentral()
+}
+
+dependencies {
+  // Core AspectJ dependencies
+  implementation 'org.aspectj:aspectjrt:1.9.25.1'
+  implementation 'org.aspectj:aspectjweaver:1.9.25.1'
+
+}
+
+compileAspectj {
+  sourceCompatibility = "17"
+  targetCompatibility = "17"
+}
+
+// Task to inspect bytecode for bridge methods
+tasks.register('checkBridgeMethods') {
+  dependsOn compileJava
+  doLast {
+    def classFiles = fileTree("${buildDir}/classes/aspectj/main") {
+      include '**/*Aspect.class'
+    }
+
+    println "\n=== Bridge Method Analysis ===\n"
+
+    classFiles.each { classFile ->
+      def className = classFile.name.replace('.class', '')
+      println "Checking: ${className}"
+
+      // Use javap to inspect the class
+      def output = new ByteArrayOutputStream()
+      exec {
+        commandLine 'javap', '-v', classFile.absolutePath
+        standardOutput = output
+        errorOutput = System.err
+        ignoreExitValue = true
+      }
+
+      def hasBridgeSetter = output.toString().contains('setSecurityInterceptor') &&
+              output.toString().contains('ACC_BRIDGE')
+
+      println "  Has bridge setSecurityInterceptor: ${hasBridgeSetter ? 'YES' : 'NO'}"
+
+      // Extract line numbers for debugging
+      if (hasBridgeSetter) {
+        output.toString().eachLine { line ->
+          if (line.contains('setSecurityInterceptor') && line.contains('ACC_BRIDGE')) {
+            println "    ${line.trim()}"
+          }
+        }
+      }
+      println ""
+    }
+
+    // Also run a more detailed inspection
+    println "=== Detailed Method Analysis ===\n"
+    classFiles.each { classFile ->
+      println "Methods in ${classFile.name}:"
+      def output = new ByteArrayOutputStream()
+      exec {
+        commandLine 'javap', '-public', classFile.absolutePath
+        standardOutput = output
+        errorOutput = System.err
+        ignoreExitValue = true
+      }
+      output.toString().eachLine { line ->
+        if (line.contains('setSecurityInterceptor')) {
+          println "  ${line.trim()}"
+        }
+      }
+      println ""
+    }
+  }
+}
+
+/* Task to test different AspectJ versions
+task testWithAspectJVersion(version: String) {
+  doLast {
+    println "\n=== Testing with AspectJ ${version} ==="
+    // Update the dependency version
+    def buildFile = file('build.gradle')
+    def content = buildFile.text.replaceAll(
+            "org.aspectj:aspectjrt:[0-9.]+",
+            "org.aspectj:aspectjrt:${version}"
+    ).replaceAll(
+            "org.aspectj:aspectjweaver:[0-9.]+",
+            "org.aspectj:aspectjweaver:${version}"
+    )
+    buildFile.text = content
+
+    // Recompile
+    exec {
+      commandLine 'gradle', 'clean', 'compileJava', 'checkBridgeMethods'
+    }
+  }
+}*/
